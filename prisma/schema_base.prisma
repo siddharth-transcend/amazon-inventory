@@ -1,0 +1,93 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  }
+
+enum OrderState {
+  RESEARCH
+  RFQ
+  ORDERED
+  ARCHIVED
+}
+
+model Product {
+  id           String      @id @default(cuid())
+  asin         String      @unique
+  upc          String?
+  sku          String?     @unique
+  name         String
+  brand        String?
+  category     String?
+  amazonUrl    String?
+  imageUrl     String?
+  
+  // Workflow State
+  status       OrderState  @default(RESEARCH)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Relations
+  metrics      MarketMetrics?
+  sales        SalesData?
+  sourcing     Sourcing[]
+}
+
+model MarketMetrics {
+  id                String   @id @default(cuid())
+  productId         String   @unique
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  // BSR History
+  bsrCurrent        Int?
+  bsr30Avg          Int?
+  bsr90Avg          Int?
+  bsr365Avg         Int?
+  
+  // Buy Box & Competition
+  buyBoxPrice       Decimal? @db.Decimal(10, 2)
+  variationCount    Int?
+  totalOfferCount   Int?
+  isHazmat          Boolean  @default(false)
+  
+  lastUpdated       DateTime @updatedAt
+}
+
+model SalesData {
+  id                String   @id @default(cuid())
+  productId         String   @unique
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // Channel Breakdown (Last 30 Days)
+  fbaSales30d       Int      @default(0)
+  fbmSales30d       Int      @default(0)
+  shopifySales30d   Int      @default(0)
+  ebaySales30d      Int      @default(0)
+
+  // Period Totals
+  total7d           Int      @default(0)
+  total14d          Int      @default(0)
+  total30d          Int      @default(0)
+  total90d          Int      @default(0)
+  totalYearly       Int      @default(0)
+}
+
+model Sourcing {
+  id                String   @id @default(cuid())
+  productId         String
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  
+  supplierName      String   // e.g., "PHCT", "ABC", "UK"
+  unitCost          Decimal  @db.Decimal(10, 2)
+  moq               Int?
+  leadTimeDays      Int?
+  isLastPurchased   Boolean  @default(false)
+  quoteDate         DateTime @default(now())
+  
+  notes             String?  @db.Text
+}
