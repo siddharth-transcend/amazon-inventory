@@ -36,6 +36,9 @@ export type FullProductMetricSuite = {
   profit2025: number;
   roiPercentage: number;
 
+  // ADD THIS LINE HERE
+  totalStock: number;
+
   // Warehouse & Historical Purchases
   daysInWhSinceLastPurchase: number;
   lastPurchasedDate: string;
@@ -44,6 +47,10 @@ export type FullProductMetricSuite = {
   lastPurchasedGbpPrice: number;
   lastPurchasedQty: number;
   totalNoOfPurchasesSince2024: number;
+
+  // ADD THESE TWO LINES HERE
+  amazonStock: number;
+  toWhStock: number;
 
   // Price Matrices
   price30dMin: number;
@@ -127,7 +134,10 @@ let mockDatabase: FullProductMetricSuite[] = [
     bsr90d: 1100, variation365: "Standard Black", dayBsrAllConnection: "Stable",
     orderedB2b: true,
     orderQty: 150,
-    orderedPrice: 21.50
+    orderedPrice: 21.50,
+    totalStock: 120,
+    amazonStock: 90,   // Added missing compiler key
+    toWhStock: 30      // Added missing compiler key
   },
   {
     id: "2",
@@ -166,7 +176,10 @@ let mockDatabase: FullProductMetricSuite[] = [
     bsr90d: 4900, variation365: "Eco Green 6mm", dayBsrAllConnection: "Excellent",
     orderedB2b: false,
     orderQty: 300,
-    orderedPrice: 10.00
+    orderedPrice: 10.00,
+    totalStock: 85,
+    amazonStock: 60,   // Added missing compiler key
+    toWhStock: 25      // Added missing compiler key
   }
 ];
 
@@ -177,7 +190,11 @@ export async function getDashboardData() {
   };
 }
 
-export async function updateProductOperations(id: string, updates: { orderQty: number; orderedPrice: number; comment: string; status: any }) {
+// FIXED: Included supplier inside the parameter type structure object definition mapping
+export async function updateProductOperations(
+  id: string, 
+  updates: { orderQty: number; orderedPrice: number; comment: string; status: any; supplier?: string }
+) {
   mockDatabase = mockDatabase.map((product) => {
     if (product.id === id) {
       return {
@@ -186,11 +203,18 @@ export async function updateProductOperations(id: string, updates: { orderQty: n
         orderedPrice: updates.orderedPrice,
         comment: updates.comment,
         status: updates.status,
+        // Persist the newly selected field mapping if it is provided
+        ...(updates.supplier && { supplier: updates.supplier })
       };
     }
     return product;
   });
   
   revalidatePath("/dashboard");
+  return { success: true };
+}
+
+export async function createProduct(data: any) {
+  console.log("Placeholder create action triggered with data:", data);
   return { success: true };
 }
