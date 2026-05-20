@@ -13,10 +13,16 @@ export type FullProductMetricSuite = {
   sku: string;
   sourceCode: string; 
   bqoolGroup: string;
-  status: "NOT REVIEWED" | "NOT SELECTED" | "RESEARCH" | "RFQ" | "PENDING" | "ORDERED" | "CANCELLED" | "ARCHIVED";
+  status: "NOT REVIEWED" | "NOT SELECTED" | "RESEARCH" | "RFQ" | "PENDING" | "ORDERED" | "CANCELLED" | "ARCHIVED" | "OPEN" | "CLOSED";
   comment: string;
   sourcingDateStr: string;
+  supplierReference: string; 
+  dateOrderedStr: string;     
   
+  // Custom Local Overrides & Workflow Attributes
+  targetQty: number;
+  targetPrice: number;
+
   // Sales Volumes
   sales30dFba: number; sales30dFbm: number; sales30dShopify: number; sales30dEbay: number;
   sales7dTotal: number; sales14dTotal: number; sales30dTotal: number; sales90dTotal: number;
@@ -240,13 +246,18 @@ export async function getDashboardData() {
       const parsedLastPrice = safeParseFloat(getStockVal(stockIdx.lastPrice));
       const parsedLastQty = safeParseInt(getStockVal(stockIdx.lastQty));
       const parsedTraFbaValue = safeParseInt(getStockVal(stockIdx.traFba));
+      const lastPurchaseDateValue = getStockVal(stockIdx.lastDate) || "";
       
-      let finalStatus: "NOT REVIEWED" | "NOT SELECTED" | "RESEARCH" | "RFQ" | "PENDING" | "ORDERED" | "CANCELLED" | "ARCHIVED" = "RESEARCH";
+      let finalStatus: "NOT REVIEWED" | "NOT SELECTED" | "RESEARCH" | "RFQ" | "PENDING" | "ORDERED" | "CANCELLED" | "ARCHIVED" | "OPEN" | "CLOSED" = "RESEARCH";
       if (b2bOrderedQty > 0 || rfqComment.toUpperCase().includes("ORDERED")) {
         finalStatus = "ORDERED";
       } else if (rfqQty > 0) {
         finalStatus = "RFQ";
       }
+
+      // Default generated metrics safely mimicking structural baselines
+      const cleanBuyPrice = safeParseFloat(row[buyIdx.buyPrice]);
+      const cleanOrderQty = computedOrderedQty || b2bOrderedQty || rfqQty;
 
       activeProducts.push({
         id: String(recordCounter++),
@@ -261,7 +272,12 @@ export async function getDashboardData() {
         status: finalStatus,
         comment: rfqComment || "No notes available",
         sourcingDateStr: rawDate,
+        supplierReference: "", 
+        dateOrderedStr: finalStatus === "ORDERED" ? lastPurchaseDateValue : "", 
         
+        targetQty: cleanOrderQty || 10,
+        targetPrice: cleanBuyPrice || 0,
+
         totalStock: safeParseInt(getStockVal(stockIdx.totalStock)),
         amazonStock: parsedTraFbaValue,
         traFba: parsedTraFbaValue, 
@@ -278,12 +294,12 @@ export async function getDashboardData() {
         rfqCount: rfqQty,
         b2bOrdered: b2bOrderedQty,
         orderedQty: computedOrderedQty,
-        orderQty: computedOrderedQty || b2bOrderedQty || rfqQty,
-        orderedPrice: parsedLastPrice,
+        orderQty: cleanOrderQty,
+        orderedPrice: parsedLastPrice || cleanBuyPrice,
         rfqDetails: rfqComment,
         
         shopPrice: safeParseFloat(row[buyIdx.shopPrice]),
-        buyPriceVat: safeParseFloat(row[buyIdx.buyPrice]),
+        buyPriceVat: cleanBuyPrice,
         sellPrice: safeParseFloat(row[buyIdx.sellPrice]),
         profit: safeParseFloat(row[buyIdx.profit]),
         roiPercentage: safeParseFloat(row[buyIdx.roi]),
@@ -295,7 +311,7 @@ export async function getDashboardData() {
         lastPrice: parsedLastPrice, 
         lastPurchasedQty: parsedLastQty,
         qty: parsedLastQty,         
-        lastPurchasedDate: getStockVal(stockIdx.lastDate) || "",
+        lastPurchasedDate: lastPurchaseDateValue,
         daysInWhSinceLastPurchase: 0,
         lastPurchasedGbpPrice: 0,
         totalNoOfPurchasesSince2024: 0,
@@ -307,7 +323,7 @@ export async function getDashboardData() {
         bsr90d: buyIdx.bsr90 !== -1 ? safeParseInt(row[buyIdx.bsr90]) : 0,
         bsr365d: buyIdx.bsr365 !== -1 ? safeParseInt(row[buyIdx.bsr365]) : 0,
         
-        bsrStyleClassName: "text-lg md:text-xl font-bold text-slate-900 tracking-wide",
+        bsrStyleClassName: "text-lg md:text-xl font-bold tracking-wide",
 
         fbaSeller: buyIdx.fbaSeller !== -1 ? (row[buyIdx.fbaSeller] || "—") : "—",
         mfSeller: buyIdx.mfSeller !== -1 ? (row[buyIdx.mfSeller] || "—") : "—",
@@ -347,7 +363,6 @@ export async function updateProductOperations(id: string, updates: any) {
 }
 
 export async function createProduct(data: any) {
-  console.log("Placeholder createProduct invoked with data:", data);
   revalidatePath("/dashboard");
   return { success: true, id: "placeholder-id" };
 }
