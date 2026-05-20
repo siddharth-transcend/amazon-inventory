@@ -32,7 +32,7 @@ export default function Dashboard() {
   const [inputOrderQty, setInputOrderQty] = useState<number>(0);
   const [orderedPrice, setOrderedPrice] = useState<number>(0);
   const [comment, setComment] = useState("");
-  const [status, setStatus] = useState<any>("RESEARCH");
+  const [status, setStatus] = useState<"NOT REVIEWED" | "NOT SELECTED" | "RESEARCH" | "RFQ" | "PENDING" | "ORDERED" | "CANCELLED" | "ARCHIVED">("RESEARCH");
   const [supplier, setSupplier] = useState(""); 
 
   const [locallyCommittedIds, setLocallyCommittedIds] = useState<Set<string>>(new Set());

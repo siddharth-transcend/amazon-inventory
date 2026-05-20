@@ -12,6 +12,7 @@
     "@prisma/client": "^5.22.0",
     "@supabase/supabase-js": "^2.105.4",
     "@tailwindcss/postcss": "^4.3.0",
+    "googleapis": "^171.4.0",
     "lucide-react": "^1.16.0",
     "next": "14.2.16",
     "react": "^18.3.1",
