@@ -1,8 +1,8 @@
 "use server";
 
+import { google } from "googleapis";
 import { revalidatePath } from "next/cache";
 
-// Type definition covering your complete Google Sheets metric criteria
 export type FullProductMetricSuite = {
   id: string;
   asin: string;
@@ -11,210 +11,337 @@ export type FullProductMetricSuite = {
   amazonUrl: string;
   upc: string;
   sku: string;
+  sourceCode: string; 
   bqoolGroup: string;
-  status: "RESEARCH" | "RFQ" | "PENDING" | "ORDERED" | "CANCELLED" | "ARCHIVED";
+  status: "NOT REVIEWED" | "NOT SELECTED" | "RESEARCH" | "RFQ" | "PENDING" | "ORDERED" | "CANCELLED" | "ARCHIVED";
   comment: string;
+  sourcingDateStr: string;
   
   // Sales Volumes
-  sales30dFba: number;
-  sales30dFbm: number;
-  sales30dShopify: number;
-  sales30dEbay: number;
-  sales7dTotal: number;
-  sales14dTotal: number;
-  sales30dTotal: number;
-  sales90dTotal: number;
-  sales2026Total: number;
-  sales2025Total: number;
+  sales30dFba: number; sales30dFbm: number; sales30dShopify: number; sales30dEbay: number;
+  sales7dTotal: number; sales14dTotal: number; sales30dTotal: number; sales90dTotal: number;
+  sales2026Total: number; sales2025Total: number;
 
   // Profit Metrics
-  profit7d: number;
-  profit14d: number;
-  profit30d: number;
-  profit90d: number;
-  profit2026: number;
-  profit2025: number;
-  roiPercentage: number;
+  profit7d: number; profit14d: number; profit30d: number; profit90d: number;
+  profit2026: number; profit2025: number; roiPercentage: number;
 
-  // ADD THIS LINE HERE
+  // Warehouse nodes
   totalStock: number;
-
-  // Warehouse & Historical Purchases
-  daysInWhSinceLastPurchase: number;
+  amazonStock: number;        
+  traFba: number;             
+  reservedAmz: number;        
+  toAmz: number;              
+  traAmz: number;             
+  sm67ah: number;             
+  traB2b: number;             
+  traBay: number;             
+  webShp: number;             
+  traFbm: number;             
+  toWhStock: number;          
+  
+  // Sourcing Nodes
   lastPurchasedDate: string;
   lastPurchasedSupplier: string;
-  lastPurchasedShopPrice: number;
-  lastPurchasedGbpPrice: number;
-  lastPurchasedQty: number;
-  totalNoOfPurchasesSince2024: number;
+  lastPurchasedShopPrice: number; 
+  lastPrice: number;              
+  lastPurchasedQty: number;       
+  qty: number;                    
+  daysInWhSinceLastPurchase: number; 
+  lastPurchasedGbpPrice: number;     
+  totalNoOfPurchasesSince2024: number; 
 
-  // ADD THESE TWO LINES HERE
-  amazonStock: number;
-  toWhStock: number;
+  // Operational metrics
+  rfqCount: number;               
+  b2bOrdered: number;             
+  orderedQty: number;             
+  orderQty: number;               
+  orderedPrice: number;           
+  rfqDetails: string;             
 
-  // Price Matrices
-  price30dMin: number;
-  supplier30dMin: string;
-  price90dMin: number;
-  supplier90dMin: string;
-  price330dMin: number;
-  supplier330dMin: string;
+  shopPrice: number;
+  buyPriceVat: number;
+  sellPrice: number;
+  profit: number;
+  googlePrice: string; 
+  bbPrice90d: number;  
+  combinedCurrentBsr: number;
+  
+  // BSR Data points
+  bsr7d: number;
+  bsr30d: number;
+  bsr90d: number;
+  bsr365d: number;
+  
+  bsrStyleClassName: string;
 
-  // 10-day Sourcing Split
-  sourcingPrice10d: number;
-  sourcingSupplier: string;
-  phctMinPrice10d: number;
-  phctMinSupplier: string;
-  phctSecondMinPrice10d: number;
-  phctSecondMinSupplier: string;
-  abcMinPrice10d: number;
-  abcMinSupplier: string;
-  ukMinPrice10d: number;
-  ukMinSupplier: string;
+  // Buy Sheet Attributes
+  fbaSeller: string;
+  mfSeller: string;
+  introducedBy: string;
+  variation: string;
+  reviewPct: string;
 
-  // Market Conditions
+  variation365: string;
+  supplier: string;
+
+  // Market metrics 
   noOfSellers: number;
   maCogs: number;
-  shopPrice: number;
-  supplier: string;
-  buyPriceVat: number;
-  gbpPrice: number;
-  sellPrice: number;
   marketPrice: number;
-  profit: number;
-  combinedCurrentBsr: number;
-  bsr30d: number;
   estimatedSales: number;
-  bsr90d: number;
-  variation365: string;
   dayBsrAllConnection: string;
-  orderedB2b: boolean;
 
-  // User Editable Operational Fields
-  orderQty: number;
-  orderedPrice: number;
+  // Historical / Market Splits
+  price30dMin: number; supplier30dMin: string;
+  price90dMin: number; supplier90dMin: string;
+  price330dMin: number; supplier330dMin: string;
+  sourcingPrice10d: number; sourcingSupplier: string;
+  phctMinPrice10d: number; phctMinSupplier: string;
+  phctSecondMinPrice10d: number; phctSecondMinSupplier: string;
+  abcMinPrice10d: number; abcMinSupplier: string;
+  ukMinPrice10d: number; ukMinSupplier: string;
 };
 
-// Global in-memory variable to allow real-time client edits during prototyping
-let mockDatabase: FullProductMetricSuite[] = [
-  {
-    id: "1",
-    asin: "B08N5WRWNW",
-    name: "Wireless Bluetooth Earbuds Pro",
-    brand: "SoundWave",
-    amazonUrl: "https://amazon.com/dp/B08N5WRWNW",
-    upc: "197644032115",
-    sku: "SW-EAR-PRO-BLACK",
-    bqoolGroup: "Group Alpha",
-    status: "RFQ",
-    comment: "Awaiting supplier holiday price sheet confirmation",
-    sales30dFba: 120, sales30dFbm: 15, sales30dShopify: 45, sales30dEbay: 10,
-    sales7dTotal: 45, sales14dTotal: 92, sales30dTotal: 190, sales90dTotal: 540,
-    sales2026Total: 840, sales2025Total: 2100,
-    profit7d: 315, profit14d: 644, profit30d: 1330, profit90d: 3780,
-    profit2026: 5880, profit2025: 14700, roiPercentage: 38.5,
-    daysInWhSinceLastPurchase: 14,
-    lastPurchasedDate: "2026-04-20",
-    lastPurchasedSupplier: "PHCT",
-    lastPurchasedShopPrice: 22.50,
-    lastPurchasedGbpPrice: 18.20,
-    lastPurchasedQty: 250,
-    totalNoOfPurchasesSince2024: 18,
-    price30dMin: 21.00, supplier30dMin: "ABC",
-    price90dMin: 19.50, supplier90dMin: "PHCT",
-    price330dMin: 18.00, supplier330dMin: "UK Main",
-    sourcingPrice10d: 22.00, sourcingSupplier: "PHCT",
-    phctMinPrice10d: 21.50, phctMinSupplier: "PHCT-A",
-    phctSecondMinPrice10d: 22.10, phctSecondMinSupplier: "PHCT-B",
-    abcMinPrice10d: 23.00, abcMinSupplier: "ABC-Bulk",
-    ukMinPrice10d: 24.50, ukMinSupplier: "UK-Express",
-    noOfSellers: 8, maCogs: 18.50, shopPrice: 22.50, supplier: "PHCT",
-    buyPriceVat: 27.00, gbpPrice: 18.20, sellPrice: 49.99, marketPrice: 51.00,
-    profit: 14.50, combinedCurrentBsr: 1200, bsr30d: 1450, estimatedSales: 210,
-    bsr90d: 1100, variation365: "Standard Black", dayBsrAllConnection: "Stable",
-    orderedB2b: true,
-    orderQty: 150,
-    orderedPrice: 21.50,
-    totalStock: 120,
-    amazonStock: 90,   // Added missing compiler key
-    toWhStock: 30      // Added missing compiler key
-  },
-  {
-    id: "2",
-    asin: "B09V3KXJPB",
-    name: "Premium Yoga Mat 6mm",
-    brand: "FlexiFit",
-    amazonUrl: "https://amazon.com/dp/B09V3KXJPB",
-    upc: "742699314552",
-    sku: "FF-YOGA-MAT-GRN",
-    bqoolGroup: "Group Beta",
-    status: "ORDERED",
-    comment: "Deposit paid. Vessel tracking updates next Tuesday.",
-    sales30dFba: 85, sales30dFbm: 0, sales30dShopify: 12, sales30dEbay: 5,
-    sales7dTotal: 22, sales14dTotal: 48, sales30dTotal: 102, sales90dTotal: 310,
-    sales2026Total: 490, sales2025Total: 1450,
-    profit7d: 110, profit14d: 240, profit30d: 510, profit90d: 1550,
-    profit2026: 2450, profit2025: 7250, roiPercentage: 25.0,
-    daysInWhSinceLastPurchase: 32,
-    lastPurchasedDate: "2026-03-12",
-    lastPurchasedSupplier: "ABC",
-    lastPurchasedShopPrice: 10.00,
-    lastPurchasedGbpPrice: 8.10,
-    lastPurchasedQty: 500,
-    totalNoOfPurchasesSince2024: 6,
-    price30dMin: 10.00, supplier30dMin: "ABC",
-    price90dMin: 9.80, supplier90dMin: "ABC",
-    price330dMin: 9.20, supplier330dMin: "PHCT",
-    sourcingPrice10d: 10.00, sourcingSupplier: "ABC",
-    phctMinPrice10d: 10.50, phctMinSupplier: "PHCT-Direct",
-    phctSecondMinPrice10d: 11.00, phctSecondMinSupplier: "PHCT-Agent",
-    abcMinPrice10d: 9.90, abcMinSupplier: "ABC-Factory",
-    ukMinPrice10d: 12.00, ukMinSupplier: "UK-Distro",
-    noOfSellers: 4, maCogs: 8.10, shopPrice: 10.00, supplier: "ABC",
-    buyPriceVat: 12.00, gbpPrice: 8.10, sellPrice: 24.99, marketPrice: 24.99,
-    profit: 6.20, combinedCurrentBsr: 4500, bsr30d: 4200, estimatedSales: 95,
-    bsr90d: 4900, variation365: "Eco Green 6mm", dayBsrAllConnection: "Excellent",
-    orderedB2b: false,
-    orderQty: 300,
-    orderedPrice: 10.00,
-    totalStock: 85,
-    amazonStock: 60,   // Added missing compiler key
-    toWhStock: 25      // Added missing compiler key
-  }
-];
+async function getGoogleSheetsClient() {
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const auth = new google.auth.JWT({
+    email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
+    key: privateKey,
+    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+  });
+  return google.sheets({ version: "v4", auth });
+}
+
+function safeParseInt(val: string): number {
+  if (!val) return 0;
+  const clean = val.replace(/[^0-9.-]/g, "");
+  const parsed = parseInt(clean, 10);
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+function safeParseFloat(val: string): number {
+  if (!val) return 0;
+  const clean = val.replace(/[^0-9.-]/g, "");
+  const parsed = parseFloat(clean);
+  return isNaN(parsed) ? 0 : parsed;
+}
 
 export async function getDashboardData() {
-  return { 
-    products: mockDatabase, 
-    uniqueSuppliers: Array.from(new Set(mockDatabase.map(p => p.supplier))) 
-  };
-}
+  try {
+    const sheets = await getGoogleSheetsClient();
 
-// FIXED: Included supplier inside the parameter type structure object definition mapping
-export async function updateProductOperations(
-  id: string, 
-  updates: { orderQty: number; orderedPrice: number; comment: string; status: any; supplier?: string }
-) {
-  mockDatabase = mockDatabase.map((product) => {
-    if (product.id === id) {
-      return {
-        ...product,
-        orderQty: updates.orderQty,
-        orderedPrice: updates.orderedPrice,
-        comment: updates.comment,
-        status: updates.status,
-        // Persist the newly selected field mapping if it is provided
-        ...(updates.supplier && { supplier: updates.supplier })
-      };
+    const [buySheetResponse, stockResponse] = await Promise.all([
+      sheets.spreadsheets.values.get({
+        spreadsheetId: process.env.SPREADSHEET_ID_BUYSHEET_2026,
+        range: "Buysheet!A:AO",
+        valueRenderOption: "FORMATTED_VALUE",
+      }),
+      sheets.spreadsheets.values.get({
+        spreadsheetId: process.env.SPREADSHEET_ID_STOCK_INVENTORY_2024,
+        range: "'Stock & Inventory'!A:AO",
+        valueRenderOption: "FORMATTED_VALUE",
+      })
+    ]);
+
+    const buyRows = buySheetResponse.data.values || [];
+    const stockRows = stockResponse.data.values || [];
+
+    if (buyRows.length === 0) return { products: [], uniqueSuppliers: [], uniqueBrands: [], uniqueDates: [] };
+
+    const buyHeaders = buyRows[0].map((h: string) => h.toUpperCase().trim());
+    const stockHeaders = (stockRows[0] || []).map((h: string) => h.toUpperCase().trim());
+
+    const buyIdx = {
+      sourcingDate: buyHeaders.findIndex(h => h.includes("SOURCING DATE")),
+      name: buyHeaders.findIndex(h => h.includes("PRODUCT NAME")),
+      asin: buyHeaders.findIndex(h => h.includes("ASIN")),
+      upc: buyHeaders.findIndex(h => h.includes("UPC")),
+      url: buyHeaders.findIndex(h => h.includes("AMZ URL")),
+      shopPrice: buyHeaders.findIndex(h => h.includes("SHOP PRICE")),
+      buyPrice: buyHeaders.findIndex(h => h.includes("BUY PRICE")),
+      sellPrice: buyHeaders.findIndex(h => h.includes("SELL PRICE")),
+      profit: buyHeaders.findIndex(h => h.includes("PROFIT")),
+      roi: buyHeaders.findIndex(h => h.includes("ROI")),
+      brand: buyHeaders.findIndex(h => h.includes("BRAND")),
+      
+      bsr7: buyHeaders.findIndex(h => h.includes("7 DAY BSR")),
+      bsr30: buyHeaders.findIndex(h => h.includes("30 DAY BSR")),
+      bsr90: buyHeaders.findIndex(h => h.includes("90 DAY BSR")),
+      bsr365: buyHeaders.findIndex(h => h.includes("365 DAY BSR")),
+      
+      fbaSeller: buyHeaders.findIndex(h => h === "FBA SELLER" || h.includes("FBA SELLER")),
+      mfSeller: buyHeaders.findIndex(h => h === "MF SELLER" || h.includes("MF SELLER")),
+      introducedBy: buyHeaders.findIndex(h => h.includes("INTRODUCED BY")),
+      variation: buyHeaders.findIndex(h => h === "VARIATION"),
+      reviewPct: buyHeaders.findIndex(h => h.includes("REVIEW PCT") || h.includes("REVIEW %")),
+
+      sourceCode: buyHeaders.findIndex(h => h.includes("SOURCE CODE")),
+      googlePrice: buyHeaders.findIndex(h => h.includes("GOOGLE PRICE")),
+      bbPrice90d: buyHeaders.findIndex(h => h.includes("BB PRICE") || h.includes("90 DAYS AVERAGE")),
+    };
+
+    const stockIdx = {
+      sku: stockHeaders.findIndex(h => h.includes("SKU")),
+      asin: stockHeaders.findIndex(h => h.includes("ASIN")),
+      totalStock: stockHeaders.findIndex(h => h.includes("TOTAL STOCK")),
+      
+      traFba: stockHeaders.findIndex(h => h.includes("TRA FBA")),
+      reservedAmz: stockHeaders.findIndex(h => h.includes("RESERVED AMZ")),
+      toAmz: stockHeaders.findIndex(h => h.includes("TO AMZ")),
+      traAmz: stockHeaders.findIndex(h => h.includes("TRA AMZ")),
+      sm67ah: stockHeaders.findIndex(h => h.includes("SM6 7AH")),
+      traB2b: stockHeaders.findIndex(h => h.includes("TRA B2B")),
+      traBay: stockHeaders.findIndex(h => h.includes("TRA BAY")),
+      webShp: stockHeaders.findIndex(h => h.includes("WEB SHP")),
+      traFbm: stockHeaders.findIndex(h => h.includes("TRA FBM")),
+      toWhs: stockHeaders.findIndex(h => h.includes("TO WHS")),
+
+      lastSupplier: stockHeaders.findIndex(h => h.includes("LAST PURCHASED SUPPLIER")),
+      lastPrice: stockHeaders.findIndex(h => h.includes("LAST PURCHASED PRICE")),
+      lastQty: stockHeaders.findIndex(h => h.includes("LAST PURCHASED QUANTITY")),
+      lastDate: stockHeaders.findIndex(h => h.includes("LAST PURCHASED DATE")),
+      
+      currentBsr: stockHeaders.findIndex(h => h.includes("CURRENT BSR")),
+      rfqCount: stockHeaders.findIndex(h => h.includes("RFQ")),
+      b2bOrdered: stockHeaders.findIndex(h => h.includes("B2B ORDERED")),
+      orderedQty: stockHeaders.findIndex(h => h.includes("ORDERED QTY")),
+      rfqDetails: stockHeaders.findIndex(h => h.includes("RFQ DETAILS"))
+    };
+
+    const stockMap = new Map();
+    for (let i = 1; i < stockRows.length; i++) {
+      const row = stockRows[i];
+      if (!row || row.length === 0) continue;
+      const asinCol = stockIdx.asin !== -1 ? stockIdx.asin : 2;
+      const asinKey = row[asinCol]?.trim().toUpperCase(); 
+      if (asinKey && asinKey !== "ASIN" && asinKey !== "") {
+        stockMap.set(asinKey, row);
+      }
     }
-    return product;
-  });
-  
-  revalidatePath("/dashboard");
-  return { success: true };
+
+    const rowsToProcess = buyRows.slice(1).filter(row => row[buyIdx.asin]?.trim());
+    const activeProducts: FullProductMetricSuite[] = [];
+    const dateDiscoverySet = new Set<string>();
+    let recordCounter = 1;
+
+    for (const row of rowsToProcess) {
+      const itemAsin = row[buyIdx.asin]?.trim() || "";
+      const rawDate = row[buyIdx.sourcingDate]?.trim() || "";
+      if (rawDate) dateDiscoverySet.add(rawDate);
+
+      const matchedStockRow = stockMap.get(itemAsin.toUpperCase()) || [];
+      const getStockVal = (idx: number) => (idx !== -1 && matchedStockRow[idx] ? matchedStockRow[idx].trim() : "");
+
+      const b2bOrderedQty = safeParseInt(getStockVal(stockIdx.b2bOrdered));
+      const rfqQty = safeParseInt(getStockVal(stockIdx.rfqCount));
+      const rfqComment = getStockVal(stockIdx.rfqDetails);
+      const computedOrderedQty = safeParseInt(getStockVal(stockIdx.orderedQty));
+      const parsedLastPrice = safeParseFloat(getStockVal(stockIdx.lastPrice));
+      const parsedLastQty = safeParseInt(getStockVal(stockIdx.lastQty));
+      const parsedTraFbaValue = safeParseInt(getStockVal(stockIdx.traFba));
+      
+      let finalStatus: "NOT REVIEWED" | "NOT SELECTED" | "RESEARCH" | "RFQ" | "PENDING" | "ORDERED" | "CANCELLED" | "ARCHIVED" = "RESEARCH";
+      if (b2bOrderedQty > 0 || rfqComment.toUpperCase().includes("ORDERED")) {
+        finalStatus = "ORDERED";
+      } else if (rfqQty > 0) {
+        finalStatus = "RFQ";
+      }
+
+      activeProducts.push({
+        id: String(recordCounter++),
+        asin: itemAsin,
+        name: row[buyIdx.name] || "Unknown Catalog Product",
+        brand: row[buyIdx.brand] || "Generic Brand",
+        amazonUrl: row[buyIdx.url] || "",
+        upc: row[buyIdx.upc] || "",
+        sku: getStockVal(stockIdx.sku) || `SKU-NEW-${itemAsin}`,
+        sourceCode: row[buyIdx.sourceCode] || "N/A",
+        bqoolGroup: "Inbound Pipeline Flow",
+        status: finalStatus,
+        comment: rfqComment || "No notes available",
+        sourcingDateStr: rawDate,
+        
+        totalStock: safeParseInt(getStockVal(stockIdx.totalStock)),
+        amazonStock: parsedTraFbaValue,
+        traFba: parsedTraFbaValue, 
+        reservedAmz: safeParseInt(getStockVal(stockIdx.reservedAmz)),
+        toAmz: safeParseInt(getStockVal(stockIdx.toAmz)),
+        traAmz: safeParseInt(getStockVal(stockIdx.traAmz)),
+        sm67ah: safeParseInt(getStockVal(stockIdx.sm67ah)),
+        traB2b: safeParseInt(getStockVal(stockIdx.traB2b)),
+        traBay: safeParseInt(getStockVal(stockIdx.traBay)),
+        webShp: safeParseInt(getStockVal(stockIdx.webShp)),
+        traFbm: safeParseInt(getStockVal(stockIdx.traFbm)),
+        toWhStock: safeParseInt(getStockVal(stockIdx.toWhs)),
+
+        rfqCount: rfqQty,
+        b2bOrdered: b2bOrderedQty,
+        orderedQty: computedOrderedQty,
+        orderQty: computedOrderedQty || b2bOrderedQty || rfqQty,
+        orderedPrice: parsedLastPrice,
+        rfqDetails: rfqComment,
+        
+        shopPrice: safeParseFloat(row[buyIdx.shopPrice]),
+        buyPriceVat: safeParseFloat(row[buyIdx.buyPrice]),
+        sellPrice: safeParseFloat(row[buyIdx.sellPrice]),
+        profit: safeParseFloat(row[buyIdx.profit]),
+        roiPercentage: safeParseFloat(row[buyIdx.roi]),
+        googlePrice: row[buyIdx.googlePrice] || "N/A",
+        bbPrice90d: safeParseFloat(row[buyIdx.bbPrice90d]),
+
+        lastPurchasedSupplier: getStockVal(stockIdx.lastSupplier) || "Not Sourced",
+        lastPurchasedShopPrice: parsedLastPrice,
+        lastPrice: parsedLastPrice, 
+        lastPurchasedQty: parsedLastQty,
+        qty: parsedLastQty,         
+        lastPurchasedDate: getStockVal(stockIdx.lastDate) || "",
+        daysInWhSinceLastPurchase: 0,
+        lastPurchasedGbpPrice: 0,
+        totalNoOfPurchasesSince2024: 0,
+        
+        combinedCurrentBsr: safeParseInt(getStockVal(stockIdx.currentBsr)),
+        
+        bsr7d: buyIdx.bsr7 !== -1 ? safeParseInt(row[buyIdx.bsr7]) : 0,
+        bsr30d: buyIdx.bsr30 !== -1 ? safeParseInt(row[buyIdx.bsr30]) : 0,
+        bsr90d: buyIdx.bsr90 !== -1 ? safeParseInt(row[buyIdx.bsr90]) : 0,
+        bsr365d: buyIdx.bsr365 !== -1 ? safeParseInt(row[buyIdx.bsr365]) : 0,
+        
+        bsrStyleClassName: "text-lg md:text-xl font-bold text-slate-900 tracking-wide",
+
+        fbaSeller: buyIdx.fbaSeller !== -1 ? (row[buyIdx.fbaSeller] || "—") : "—",
+        mfSeller: buyIdx.mfSeller !== -1 ? (row[buyIdx.mfSeller] || "—") : "—",
+        introducedBy: buyIdx.introducedBy !== -1 ? (row[buyIdx.introducedBy] || "—") : "—",
+        variation: buyIdx.variation !== -1 ? (row[buyIdx.variation] || "—") : "—",
+        reviewPct: buyIdx.reviewPct !== -1 ? (row[buyIdx.reviewPct] || "—") : "—",
+
+        variation365: buyIdx.bsr365 !== -1 ? (row[buyIdx.bsr365] || "—") : "—",
+        supplier: getStockVal(stockIdx.lastSupplier) || "Pending Verification",
+
+        noOfSellers: 0, maCogs: 0, marketPrice: 0, estimatedSales: 0, dayBsrAllConnection: "Stable",
+        sales30dFba: 0, sales30dFbm: 0, sales30dShopify: 0, sales30dEbay: 0, sales7dTotal: 0, sales14dTotal: 0,
+        sales30dTotal: 0, sales90dTotal: 0, sales2026Total: 0, sales2025Total: 0, profit7d: 0,
+        profit14d: 0, profit30d: 0, profit90d: 0, profit2026: 0, profit2025: 0,
+        price30dMin: 0, supplier30dMin: "", price90dMin: 0, supplier90dMin: "", price330dMin: 0,
+        supplier330dMin: "", sourcingPrice10d: 0, sourcingSupplier: "", phctMinPrice10d: 0,
+        phctMinSupplier: "", phctSecondMinPrice10d: 0, phctSecondMinSupplier: "", abcMinPrice10d: 0,
+        abcMinSupplier: "", ukMinPrice10d: 0, ukMinSupplier: ""
+      });
+    }
+
+    const uniqueSuppliers = Array.from(new Set(activeProducts.map(p => p.supplier).filter(Boolean)));
+    const uniqueBrands = Array.from(new Set(activeProducts.map(p => p.brand).filter(Boolean)));
+    const uniqueDates = Array.from(dateDiscoverySet).filter(Boolean);
+    
+    return { products: activeProducts, uniqueSuppliers, uniqueBrands, uniqueDates };
+
+  } catch (error) {
+    console.error("Critical Matrix Integration Fault:", error);
+    return { products: [], uniqueSuppliers: [], uniqueBrands: [], uniqueDates: [] };
+  }
 }
 
-export async function createProduct(data: any) {
-  console.log("Placeholder create action triggered with data:", data);
+export async function updateProductOperations(id: string, updates: any) {
+  revalidatePath("/dashboard");
   return { success: true };
 }
