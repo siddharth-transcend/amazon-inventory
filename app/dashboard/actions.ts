@@ -345,3 +345,9 @@ export async function updateProductOperations(id: string, updates: any) {
   revalidatePath("/dashboard");
   return { success: true };
 }
+
+export async function createProduct(data: any) {
+  console.log("Placeholder createProduct invoked with data:", data);
+  revalidatePath("/dashboard");
+  return { success: true, id: "placeholder-id" };
+}
