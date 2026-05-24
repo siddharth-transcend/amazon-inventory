@@ -173,133 +173,137 @@ async function getZohoAccessToken(): Promise<string> {
 /**
  * Smart router for Zoho Analytics V2 Data Fetching.
  * - Routes standard tables through the quick synchronous endpoint.
- * - Routes SQL Query Reports through the mandatory Asynchronous Bulk Export workflow.
+ * - Routes SQL Query Reports through the official Asynchronous Bulk Export workflow.
  */
-async function fetchZohoViewData(viewId: string): Promise<any[]> {
+
+export async function fetchZohoViewData(viewId: string): Promise<any[]> {
   try {
     if (!viewId) return [];
 
     const accessToken = await getZohoAccessToken();
-    const workspaceId = process.env.ZOHO_WORKSPACE_ID;
-    const orgId = process.env.ZOHO_ORG_ID || "333938000005669388"; 
-    const apiDomain = process.env.ZOHO_API_DOMAIN || "https://analyticsapi.zoho.in"; // Match your verified region (.in)
+    
+    // 1. Hardcoded fallback keys verified directly from your local system logs
+    const orgId = (process.env.ZOHO_ORG_ID || "60026153974").trim();
+    const workspaceId = (process.env.ZOHO_WORKSPACE_ID || "333938000005669388").trim();
 
     // Identify if the requested ID belongs to one of your SQL Query Reports
     const isQueryReport = viewId === "333938000009766799" || viewId === "333938000010405171";
 
-    // Global headers required for secure V2 routing
+    // 2. Global headers required for secure V2 routing (Org ID must be passed here)
     const baseHeaders: Record<string, string> = {
       "Authorization": `Zoho-oauthtoken ${accessToken}`,
-      "Accept": "application/vnd.zoho.v2+json",
-      "ZANALYTICS-ORGID": String(orgId),
+      "ZANALYTICS-ORGID": orgId,
     };
 
-    // ==========================================
-    // PATH A: SQL QUERY REPORTS (Asynchronous Bulk Workflow)
-    // ==========================================
+    // =========================================================================
+    // PATH A: SQL QUERY REPORTS (Asynchronous Bulk Export Flow)
+    // =========================================================================
     if (isQueryReport) {
-      const isSales = viewId === "333938000010405171";
-      console.log(`🎬 View ${viewId} detected as Query Report (${isSales ? "Large Sales" : "Inventory"}). Starting Bulk Export...`);
-      
-      const bulkHeaders = {
-        ...baseHeaders,
-        "Accept": "application/json"
-      };
-
       const configParams = JSON.stringify({ responseFormat: "json" });
-      const initUrl = `${apiDomain}/restapi/v2/bulk/workspaces/${workspaceId}/views/${viewId}/data?CONFIG=${encodeURIComponent(configParams)}`;
+      const targetRequestUri = `https://analyticsapi.zoho.in/restapi/v2/bulk/workspaces/${workspaceId}/views/${viewId}/data?CONFIG=${encodeURIComponent(configParams)}`;
 
-      // Step 1: Initialize the background export job
-      const initRes = await fetch(initUrl, { 
-        method: "GET", 
-        headers: bulkHeaders,
+      console.log(`🎬 [Bulk] View ${viewId} detected as Query Report. Initializing Job...`);
+
+      // Step 1: Fire the asynchronous job initialization request
+      const response = await fetch(targetRequestUri, {
+        method: "GET",
+        headers: baseHeaders,
         cache: "no-store"
       });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error(`❌ Failed to initialize bulk job for ${viewId}:`, errText);
+        return [];
+      }
+
+      const jsonResult = await response.json();
+      const jobId = jsonResult.data?.jobId;
       
-      if (!initRes.ok) {
-        const errText = await initRes.text();
-        console.error(`❌ Failed to initialize bulk job for ${viewId}:`, errText.substring(0, 150));
-        return [];
-      }
-
-      const initData = await initRes.json();
-      const jobId = initData.data?.jobId || initData.jobId;
       if (!jobId) {
-        console.error(`❌ No jobId returned for view ${viewId}. Response:`, initData);
+        console.error(`❌ No jobId returned from Zoho for view ${viewId}`, jsonResult);
         return [];
       }
 
-      // Step 2: Establish tracking variables safely
-      let rawCode = initData.data?.jobCode || initData.jobCode || initData.data?.jobState || initData.jobState || 1002;
-      let jobCode = Number(rawCode); 
+      // Step 2: Poll status endpoint until completion (Job Code 1004)
+      const statusUrl = `https://analyticsapi.zoho.in/restapi/v2/bulk/workspaces/${workspaceId}/exportjobs/${jobId}`;
+      let jobCompleted = false;
       let attempts = 0;
-      const maxAttempts = 15; // Safe window up to 30 seconds for 30,000+ records
-      const statusUrl = `${apiDomain}/restapi/v2/bulk/workspaces/${workspaceId}/exportjobs/${jobId}`;
+      const maxAttempts = 20;
 
-      console.log(`⏳ Job ${jobId.substring(0, 8)} initialized. Current code: ${jobCode}. Processing stream...`);
+      console.log(`⏳ Bulk Job ${jobId} successfully created. Starting polling lifecycle...`);
 
-      // Keep polling ONLY if the status indicates it is still compiling or queued
-      while ((jobCode === 1001 || jobCode === 1002) && attempts < maxAttempts) {
+      while (!jobCompleted && attempts < maxAttempts) {
         attempts++;
-        console.log(`   ⏱️ View ...${viewId.substring(12)} | Job ${jobId.substring(0, 6)} | Waiting 2s for 30k+ records to compile (Attempt ${attempts})...`);
-        await new Promise((resolve) => setTimeout(resolve, 2000)); 
-
-        const statusRes = await fetch(statusUrl, { method: "GET", headers: bulkHeaders, cache: "no-store" });
-        if (statusRes.ok) {
-          const statusData = await statusRes.json();
-          const checkCode = statusData.data?.jobCode || statusData.jobCode || statusData.data?.jobState || statusData.jobState;
-          jobCode = Number(checkCode);
-          console.log(`   ➔ View ...${viewId.substring(12)} | Job ${jobId.substring(0, 6)} | Update: Status Code is ${jobCode}`);
-        } else {
-          console.warn(`   ⚠️ Status check missed a beat on attempt ${attempts}`);
-        }
-      }
-
-      // Step 3: Extract and deliver the dataset
-      if (jobCode === 1004) {
-        console.log(`🎉 Job ${jobId.substring(0, 8)} Complete! Downloading compiled dataset stream...`);
-        const dataUrl = `${apiDomain}/restapi/v2/bulk/workspaces/${workspaceId}/exportjobs/${jobId}/data`;
-        const dataRes = await fetch(dataUrl, { method: "GET", headers: bulkHeaders, cache: "no-store" });
+        // Wait 2 seconds between status checks to prevent rate limits
+        await new Promise(resolve => setTimeout(resolve, 2000)); 
         
-        if (!dataRes.ok) {
-          console.error(`❌ Failed downloading processed dataset stream for job ${jobId}`);
+        const statusRes = await fetch(statusUrl, { headers: baseHeaders, cache: "no-store" });
+        if (!statusRes.ok) continue;
+
+        const statusJson = await statusRes.json();
+        const jobCode = statusJson.data?.jobCode;
+
+        // FIXED: Using Number() to protect against string/number comparison mismatches ("1004" vs 1004)
+        if (Number(jobCode) === 1004) { 
+          // Step 3: Job successful! Download the compiled dataset stream
+          console.log(`🎉 Job ${jobId} compiled! Downloading final JSON payload...`);
+          jobCompleted = true;
+          
+          const downloadUrl = `https://analyticsapi.zoho.in/restapi/v2/bulk/workspaces/${workspaceId}/exportjobs/${jobId}/data`;
+          const dataRes = await fetch(downloadUrl, { headers: baseHeaders, cache: "no-store" });
+          
+          if (dataRes.ok) {
+            const finalData = await dataRes.json();
+            console.log(`✅ Success! Collected dataset rows from Zoho for View ${viewId}`);
+            
+            // Handle both wrapped and unwrapped JSON array formats securely
+            if (Array.isArray(finalData)) return finalData;
+            return finalData.data || finalData.records || [];
+          } else {
+            const errText = await dataRes.text();
+            console.error(`❌ Failed to download compiled bulk data for view ${viewId}:`, errText);
+            return [];
+          }
+        } else if (Number(jobCode) === 1003 || Number(jobCode) === 1005) {
+          console.error(`❌ Zoho Bulk job failed or was canceled internally with code: ${jobCode}`);
           return [];
         }
-
-        const finalJson = await dataRes.json();
-        const recordsCount = (finalJson.data || []).length;
-        console.log(`✅ Success! Collected ${recordsCount} rows from Zoho for View ${viewId}`);
-        return finalJson.data || [];
-      } else {
-        console.error(`❌ Zoho bulk job ${jobId} exited unexpectedly with code: ${jobCode}`);
-        return [];
+        
+        console.log(`   ⏱️ View ...${viewId.substring(12)} | Job status code: ${jobCode}. Processing... (Attempt ${attempts})`);
       }
+      
+      if (!jobCompleted) {
+        console.warn(`⚠️ Bulk job polling timed out after ${maxAttempts} attempts.`);
+      }
+      return [];
     }
 
-    // ==========================================
-    // PATH B: STANDARD DATA TABLES (Synchronous Baseline Workflow)
-    // ==========================================
-    const syncUrl = `${apiDomain}/api/v2/workspaces/${workspaceId}/views/${viewId}/data?action=export`;
-    baseHeaders["ZAL-ACTION"] = "export";
-    baseHeaders["ZAL-EXPORT-CONFIG"] = JSON.stringify({ responseFormat: "json" });
+    // =========================================================================
+    // PATH B: STANDARD DATA TABLES (Synchronous Export Flow)
+    // =========================================================================
+    const syncConfig = JSON.stringify({ responseFormat: "json" });
+    const syncUrl = `https://analyticsapi.zoho.in/restapi/v2/workspaces/${workspaceId}/views/${viewId}/data?CONFIG=${encodeURIComponent(syncConfig)}`;
 
-    const res = await fetch(syncUrl, {
+    console.log(`🎬 [Sync] Fetching standard data table view: ${viewId}`);
+    
+    const response = await fetch(syncUrl, {
       method: "GET",
       headers: baseHeaders,
       cache: "no-store"
     });
 
-    if (!res.ok) {
-      const errorText = await res.text();
-      console.error(`❌ Standard API View ${viewId} rejected (${res.status}):`, errorText.substring(0, 150));
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error(`❌ Standard synchronous fetch failed for view ${viewId}:`, errText);
       return [];
     }
 
-    const json = await res.json();
-    return json.data || [];
+    const syncJson = await response.json();
+    return syncJson.data || [];
 
   } catch (error) {
-    console.error(`❌ Critical error in fetchZohoViewData wrapper for view ${viewId}:`, error);
+    console.error(`❌ Critical top-level wrapper exception in fetchZohoViewData:`, error);
     return [];
   }
 }

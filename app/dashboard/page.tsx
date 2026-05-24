@@ -7,7 +7,8 @@ import {
   Warehouse, ShoppingCart, Filter, ExternalLink,
   Copy, Check, ChevronLeft, ChevronRight, Calendar, Download, AlertTriangle, TrendingUp, Link2
 } from "lucide-react";
-
+export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
 export default function Dashboard() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
