@@ -488,7 +488,7 @@ if (p) {
 
   const dynamicRelevantSuppliers = useMemo(() => {
     const subset = baseFilteredProducts
-      .map(p => p.supplier) // Fixed: Keep unified with supplier field tracking
+      .map(p => p.sourceUrl) // Fixed: Keep unified with supplier field tracking
       .filter(Boolean);
   
     const uniqueSuppliers = Array.from(new Set(subset));
@@ -504,7 +504,7 @@ if (p) {
   const uniqueSuppliersAll = useMemo(() => Array.from(new Set(overviewProducts.map(p => p.supplier).filter(Boolean))), [overviewProducts]);
 
   const pipelineSuppliers = useMemo(() => {
-    const subset = pipelineProducts.map(p => p.supplier).filter(Boolean); // Fixed: Map to p.supplier
+    const subset = pipelineProducts.map(p => p.sourceUrl).filter(Boolean); // Fixed: Map to p.supplier
     return Array.from(new Set(subset)).sort();
   }, [pipelineProducts]);
 
