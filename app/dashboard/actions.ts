@@ -915,11 +915,18 @@ export async function createProduct(data: any) {
   }
 }
 
-export async function updateProductOperations(id: string, updates: any) {
+export async function updateProductOperations(id: string, updates: any, userEmail: string = "unknown@system.com") {
   try {
     if (!id) {
       return { success: false, error: "Missing Target Row Primary Key Reference Token." };
     }
+
+    // 1. Fetch current row snapshot before updating to capture its current context (SKU/PO) for the log
+    const { data: currentItem } = await supabase
+      .from("pipeline_items")
+      .select("sku, purchase_order_number")
+      .eq("id", id)
+      .single();
 
     // Explicitly build the update payload to match your Supabase columns precisely
     const { error } = await supabase
@@ -953,6 +960,32 @@ export async function updateProductOperations(id: string, updates: any) {
 
     if (error) throw error;
     
+// 3. 🚀 THE AUDIT TRAIL LEAF: Build the exact object payload representing what changed
+const cleanedPayload: Record<string, any> = {};
+Object.entries(updates).forEach(([key, value]) => {
+  if (value !== undefined) cleanedPayload[key] = value;
+});
+
+// Automatically classify if this action was a Proforma file batch apply or a quick manual cell update
+const calculatedActionType = updates.invoiceQty !== undefined && updates.invoicePrice !== undefined 
+  ? "PROFORMA_BATCH_APPLY" 
+  : "INLINE_CELL_UPDATE";
+
+const { error: logError } = await supabase
+  .from("audit_logs")
+  .insert({
+    user_email: userEmail,
+    action_type: calculatedActionType,
+    product_id: id,
+    sku: currentItem?.sku || "UNKNOWN",
+    purchase_order: currentItem?.purchase_order_number || "UNKNOWN",
+    changes_payload: cleanedPayload
+  });
+
+if (logError) {
+  console.error("Warning: Main update succeeded, but Audit Trail row failed to save:", logError.message);
+}
+
     revalidatePath("/dashboard");
     return { success: true };
   } catch (err) {

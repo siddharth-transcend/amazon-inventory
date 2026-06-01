@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useMemo, useTransition } from "react";
 import { getDashboardData, updateProductOperations, createProduct, FullProductMetricSuite, handlePartialReceipt } from "./actions";
 import * as XLSX from "xlsx";
+import { createClient } from "@supabase/supabase-js";
+import { LogOut, Lock } from "lucide-react";
 import { 
   Sun, Moon, Search, CheckCircle2, Box, LayoutDashboard, Database,
   Warehouse, ShoppingCart, Filter, ExternalLink,
@@ -19,6 +21,11 @@ interface EditableCellProps {
   inputMode?: "decimal" | "numeric";
   className?: string;
 }
+
+// Initialize the Supabase Client for Frontend Auth tracking
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabaseBrowser = createClient(supabaseUrl, supabaseAnonKey);
 
 const EditableCell: React.FC<EditableCellProps> = ({
   value,
@@ -61,9 +68,110 @@ const EditableCell: React.FC<EditableCellProps> = ({
 export default function Dashboard() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [activeWindow, setActiveWindow] = useState<1 | 2>(1);
+  const [activeWindow, setActiveWindow] = useState<1 | 2 | 3>(1);
   const [overviewProducts, setOverviewProducts] = useState<FullProductMetricSuite[]>([]);
 const [pipelineProducts, setPipelineProducts] = useState<FullProductMetricSuite[]>([]);
+
+// =====================================================================
+  // 🚀 PASTE THE STEP 3 CODE RIGHT HERE (BELOW YOUR EXISTING STATES):
+  // =====================================================================
+  const [reconciliationReport, setReconciliationReport] = useState<any[]>([]);
+
+  const processUploadedRows = (rows: { identifier: string; qty: number; price: number }[], poNum: string) => {
+    const verifiedResults = rows.map(row => {
+      const cleanIdStr = row.identifier.trim();
+
+      const match = pipelineProducts.find(p => 
+        p.purchaseOrderNumber?.trim().toLowerCase() === poNum.trim().toLowerCase() &&
+        (p.upc?.trim() === cleanIdStr || p.sourceCode?.trim() === cleanIdStr)
+      );
+
+      if (!match) {
+        return {
+          status: "NOT_FOUND",
+          identifier: cleanIdStr,
+          actualQty: row.qty,
+          actualPrice: row.price,
+          systemProduct: null
+        };
+      }
+
+      const isPriceMismatch = Number(match.orderedPrice || 0) !== Number(row.price);
+      const isQtyMismatch = Number(match.orderQty || 0) !== Number(row.qty);
+
+      return {
+        status: isPriceMismatch ? "PRICE_MISMATCH" : (isQtyMismatch ? "QTY_MISMATCH" : "MATCH"),
+        identifier: cleanIdStr,
+        expectedQty: match.orderQty,
+        actualQty: row.qty,
+        expectedPrice: match.orderedPrice,
+        actualPrice: row.price,
+        systemProduct: match
+      };
+    });
+
+    setReconciliationReport(verifiedResults);
+  };
+
+  const handleApplyProformaToInvoices = async () => {
+    let count = 0;
+    for (const item of reconciliationReport) {
+      if (item.systemProduct) {
+        count++;
+        setPipelineProducts(prev => prev.map(p => p.id === item.systemProduct.id ? { ...p, invoiceQty: item.actualQty, invoicePrice: item.actualPrice } : p));
+        await updateProductOperations(item.systemProduct.id, {
+          invoiceQty: item.actualQty,
+          invoicePrice: item.actualPrice
+        }, user.email
+      );
+      }
+    }
+    alert(`Successfully processed and committed actual invoice metrics across ${count} products.`);
+    setReconciliationReport([]);
+  };
+  // =====================================================================
+  // 🔼 END OF STEP 3 CODE
+  // =====================================================================
+
+  // =====================================================================
+  // 🔐 SUPABASE AUTH ENGINE HOOKS
+  // =====================================================================
+  const [user, setUser] = useState<any>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authError, setAuthError] = useState("");
+
+  useEffect(() => {
+    // 1. Check current login active session status on boot
+    supabaseBrowser.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    // 2. Listen for real-time sign-in or sign-out updates
+    const { data: { subscription } } = supabaseBrowser.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError("");
+    const { error } = await supabaseBrowser.auth.signInWithPassword({ email, password });
+    if (error) {
+      setAuthError(error.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabaseBrowser.auth.signOut();
+  };
+  // =====================================================================
+
   const [searchAsin, setSearchAsin] = useState("");
   const [pipelineSearch, setPipelineSearch] = useState(""); 
   const [selectedProduct, setSelectedProduct] = useState<FullProductMetricSuite | null>(null);
@@ -455,7 +563,9 @@ if (p) {
         odooReference: (p as any).odooReference,
         status: p.status,
         comment: p.comment
-      });
+      },
+    user?.email || "unknown@system.com"
+    );
       
       if (result.success) {
         alert(`✅ Save confirmed for ASIN: ${p.asin}`);
@@ -722,6 +832,73 @@ if (p) {
   const themeCardBg = isDarkMode ? "bg-[#0b0f19] border-[#1e293b]" : "bg-white border-slate-300 shadow-sm";
   const themeInputBg = isDarkMode ? "bg-[#060814] border-[#1e293b] text-white" : "bg-white border-slate-400 text-slate-950 font-bold";
 
+// =====================================================================
+// 🔐 PASTE THE STEP 3 LOGIN GATE HERE (RIGHT BEFORE THE MAIN RETURN):
+// =====================================================================
+if (authLoading) {
+  return (
+    <div className="fixed inset-0 flex items-center justify-center bg-slate-950 text-slate-400 font-mono text-xs">
+      Verifying secure access token layers...
+    </div>
+  );
+}
+
+if (!user) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950 p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-slate-800 bg-slate-900 p-6 shadow-2xl">
+        <div className="flex flex-col items-center text-center mb-6">
+          <div className="p-3 rounded-xl bg-indigo-600/10 text-indigo-400 mb-3 border border-indigo-500/20">
+            <Lock size={20} />
+          </div>
+          <h2 className="text-sm font-black uppercase tracking-wider text-white">Internal Operations Portal</h2>
+          <p className="text-[11px] text-slate-500 font-medium mt-1">Authorized corporate access credentials required</p>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-4 text-xs font-mono">
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase text-slate-500">Corporate Email</label>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="name@company.com"
+              className="w-full border border-slate-800 rounded-lg px-3 py-2.5 bg-slate-950 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-[10px] font-black uppercase text-slate-500">Secure Password</label>
+            <input
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full border border-slate-800 rounded-lg px-3 py-2.5 bg-slate-950 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+
+          {authError && (
+            <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold leading-relaxed">
+              ⚠️ {authError}
+            </div>
+          )}
+
+          <button
+            type="submit"
+            className="w-full py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-black uppercase tracking-wider transition-colors shadow-lg shadow-indigo-600/15"
+          >
+            Authenticate & Decrypt
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+// =====================================================================
+
   return (
     <div className={`h-screen w-screen flex overflow-hidden font-sans text-xs antialiased select-none transition-colors duration-150 ${
       isDarkMode ? "bg-[#060814] text-[#94a3b8]" : "bg-[#f1f5f9] text-slate-900"
@@ -770,8 +947,29 @@ if (p) {
               <Database size={16} className="text-emerald-600 shrink-0" />
               {!isSidebarCollapsed && <span>Supplier Pipeline</span>}
             </button>
+            {/* 🚀 3. ADDED: Proforma Verifier */}
+  <button 
+    type="button" 
+    onClick={() => setActiveWindow(3)} 
+    className={`w-full flex items-center px-3 py-2.5 rounded-lg text-left font-bold transition-all ${isSidebarCollapsed ? "justify-center" : "gap-3"} ${activeWindow === 3 ? (isDarkMode ? "bg-[#1e293b] text-white" : "bg-blue-50 text-blue-950 border border-blue-200") : "opacity-75 hover:opacity-100"}`}
+  >
+    <CheckCircle2 size={16} className="text-blue-600 shrink-0" />
+    {!isSidebarCollapsed && <span>Proforma Verifier</span>}
+  </button>
           </div>
         </div>
+
+{/* 🚀 ADDED: SECURE LOGOUT BUTTON AT THE BOTTOM OF THE SIDEBAR */}
+<div className="mt-auto p-3 border-t border-slate-400/10">
+    <button
+      type="button"
+      onClick={handleLogout}
+      className={`w-full flex items-center px-3 py-2.5 rounded-lg text-left font-bold transition-all text-rose-500 hover:bg-rose-500/10 ${isSidebarCollapsed ? "justify-center" : "gap-3"}`}
+    >
+      <LogOut size={16} className="shrink-0" />
+      {!isSidebarCollapsed && <span className="text-xs uppercase tracking-wider font-black">Secure Sign Out</span>}
+    </button>
+  </div>
 
         <div className={`p-3 border-t flex flex-col gap-2 ${isDarkMode ? "border-[#1e293b] bg-[#0d1527]" : "border-slate-200 bg-slate-50"}`}>
           <button type="button" onClick={() => setIsDarkMode(!isDarkMode)} className={`w-full flex items-center justify-center gap-2 py-2 rounded-lg border text-xs font-bold transition-all ${isDarkMode ? "bg-slate-900 border-slate-800 text-amber-400 hover:bg-slate-800" : "bg-white border-slate-300 text-slate-900 shadow-sm hover:bg-slate-100"}`}>
@@ -2127,6 +2325,166 @@ if (p) {
 
           </div>
         )}
+
+{/* ===================================================================== */}
+  {/* 🚀 PASTE STEP 2: THE PROFORMA VERIFIER WORKSPACE LAYOUT RIGHT HERE:    */}
+  {/* ===================================================================== */}
+  {activeWindow === 3 && (
+    <div className="space-y-6 animate-fadeIn">
+      {/* Control Header Grid Card */}
+      <div className={`p-6 rounded-2xl border shadow-xs ${isDarkMode ? "bg-slate-900/40 border-slate-800" : "bg-white border-slate-200"}`}>
+        <h2 className="text-sm font-black uppercase tracking-wider text-indigo-500 mb-4">
+          Proforma Invoice Multi-Key Reconciliation Engine
+        </h2>
+        
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {/* PO Target Match Selector Field */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-black uppercase text-slate-500">Target Purchase Order #</label>
+            <input
+              type="text"
+              placeholder="e.g. PO-1044"
+              id="targetPoInput"
+              className={`w-full border rounded-lg px-3 py-2 text-xs font-mono focus:outline-hidden focus:ring-2 focus:ring-indigo-500 ${
+                isDarkMode ? "bg-slate-900 border-slate-800 text-white" : "bg-white border-slate-300 text-slate-900"
+              }`}
+            />
+          </div>
+
+          {/* File Dropzone Selector Field (Excel) */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-black uppercase text-slate-500">Upload Supplier Excel Sheet</label>
+            <input
+              type="file"
+              accept=".xlsx, .xls, .csv"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                const poNum = (document.getElementById("targetPoInput") as HTMLInputElement)?.value;
+                if (!file || !poNum) return alert("Please specify a target PO Number first!");
+                
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                  const bstr = evt.target?.result;
+                  const wb = XLSX.read(bstr, { type: "binary" });
+                  const wsname = wb.SheetNames[0];
+                  const ws = wb.Sheets[wsname];
+                  const data = XLSX.utils.sheet_to_json(ws) as any[];
+                  
+                  processUploadedRows(data.map(row => ({
+                    identifier: String(row.UPC || row["Source Code"] || row.ItemCode || Object.values(row)[0] || ""),
+                    qty: Number(row.Qty || row.Quantity || row["Order Qty"] || 0),
+                    price: Number(row.Price || row.Cost || row["Unit Price"] || 0)
+                  })), poNum);
+                };
+                reader.readAsBinaryString(file);
+              }}
+              className="text-xs file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-bold file:bg-indigo-600 file:text-white hover:file:bg-indigo-700 cursor-pointer"
+            />
+          </div>
+
+          {/* Copy-Paste Raw Workspace Entry Frame (PDF Data Capture) */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-[10px] font-black uppercase text-slate-500">Or Paste Raw Copy-Pasted PDF Lines</label>
+            <textarea
+              placeholder="Paste text from PDF here... (Format: Code [space] Qty [space] Price)"
+              rows={2}
+              onChange={(e) => {
+                const text = e.target.value;
+                const poNum = (document.getElementById("targetPoInput") as HTMLInputElement)?.value;
+                if (!text || !poNum) return;
+
+                const lines = text.split("\n");
+                const parsedRows = lines.map(line => {
+                  const parts = line.trim().split(/\s+/);
+                  if (parts.length < 3) return null;
+                  
+                  return {
+                    identifier: parts[0],
+                    qty: Number(parts[parts.length - 2]) || 0,
+                    price: Number(parts[parts.length - 1].replace(/[^0-9.]/g, "")) || 0
+                  };
+                }).filter(Boolean);
+
+                processUploadedRows(parsedRows as any[], poNum);
+              }}
+              className={`w-full border rounded-lg px-3 py-1.5 text-xs font-mono focus:outline-hidden focus:ring-2 focus:ring-indigo-500 ${
+                isDarkMode ? "bg-slate-900 border-slate-800 text-slate-400" : "bg-white border-slate-300 text-slate-600"
+              }`}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Verification Evaluation Data Grid View Panel */}
+      <div className={`border rounded-2xl overflow-hidden shadow-xs ${isDarkMode ? "bg-slate-900/20 border-slate-800" : "bg-white border-slate-200"}`}>
+        <table className="w-full text-left border-collapse">
+          <thead>
+            <tr className={`text-[10px] font-black uppercase tracking-wider border-b ${isDarkMode ? "bg-slate-900 border-slate-800 text-slate-400" : "bg-slate-50 border-slate-200 text-slate-500"}`}>
+              <th className="p-3">Match Status</th>
+              <th className="p-3">Supplier Identifier Token</th>
+              <th className="p-3 text-center">System SKU Reference</th>
+              <th className="p-3 text-center">Expected Qty</th>
+              <th className="p-3 text-center">Supplier Qty</th>
+              <th className="p-3 text-right">Expected Price</th>
+              <th className="p-3 text-right">Supplier Price</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-400/10 font-mono text-xs">
+            {reconciliationReport.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="p-8 text-center text-slate-400 font-sans font-bold">
+                  No proforma data imported yet. Select a target PO number and upload your spreadsheet layout or paste PDF text above.
+                </td>
+              </tr>
+            ) : (
+              reconciliationReport.map((row, idx) => {
+                const isMatch = row.status === "MATCH";
+                const isPriceErr = row.status === "PRICE_MISMATCH";
+                const isQtyErr = row.status === "QTY_MISMATCH";
+                
+                let badgeColor = "bg-rose-500/10 text-rose-500 border-rose-500/20";
+                if (isMatch) badgeColor = "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+                if (isPriceErr) badgeColor = "bg-amber-500/10 text-amber-500 border-amber-500/20";
+                if (isQtyErr) badgeColor = "bg-cyan-500/10 text-cyan-500 border-cyan-500/20"; // fallback support structural key matching validation checks
+
+                return (
+                  <tr key={idx} className={`transition-colors ${isDarkMode ? "hover:bg-slate-900/40" : "hover:bg-slate-50"}`}>
+                    <td className="p-3">
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-black border uppercase tracking-wider ${
+                        isMatch ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : 
+                        isPriceErr ? "bg-amber-500/10 text-amber-500 border-amber-500/20" : 
+                        isQtyErr ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20" : "bg-rose-500/10 text-rose-500 border-rose-500/20"
+                      }`}>
+                        {row.status}
+                      </span>
+                    </td>
+                    <td className="p-3 font-bold text-slate-400">{row.identifier}</td>
+                    <td className="p-3 text-center font-sans font-semibold">{row.systemProduct?.sku || "—"}</td>
+                    <td className="p-3 text-center text-slate-400">{row.expectedQty || 0}</td>
+                    <td className={`p-3 text-center font-black ${isQtyErr ? "text-cyan-500" : ""}`}>{row.actualQty}</td>
+                    <td className="p-3 text-right text-slate-400">£{(row.expectedPrice || 0).toFixed(2)}</td>
+                    <td className={`p-3 text-right font-black ${isPriceErr ? "text-amber-500" : ""}`}>£{(row.actualPrice || 0).toFixed(2)}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {reconciliationReport.length > 0 && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleApplyProformaToInvoices}
+            className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black uppercase tracking-wider shadow-md shadow-indigo-600/20 transition-all"
+          >
+            Push Proforma Metrics directly into Actual Invoices
+          </button>
+        </div>
+      )}
+    </div>
+  )}
+  {/* ===================================================================== */}
 
       </main>
 
